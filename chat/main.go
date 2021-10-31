@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"github.com/AnomalieXB-6783746/chatApp/trace"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"text/template"
@@ -29,9 +31,11 @@ func main() {
 	var addr = flag.String("addr", ":8080", "The addr of the application.")
 	flag.Parse() // parse the flags
 	r := newRoom()
-	//r.tracer = trace.New(os.Stdout)
+	r.tracer = trace.New(os.Stdout)
 	// listen on the root path
-	http.Handle("/", &templateHandler{filename: "chat.html"})
+	http.Handle("/chat", MustAuth(&templateHandler{filename: "chat.html"}))
+	http.Handle("/login", &templateHandler{filename: "login.html"})
+	http.HandleFunc("/auth/", loginHandler)
 	http.Handle("/room", r)
 	go r.run()
 	// start the web server
