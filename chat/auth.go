@@ -2,7 +2,8 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"github.com/stretchr/gomniauth"
+	"github.com/stretchr/objx"
 	"net/http"
 	"strings"
 )
@@ -36,7 +37,7 @@ func MustAuth(handler http.Handler) http.Handler {
 // format: /auth/{action}/{provider}
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	segments := strings.Split(r.URL.Path, "/")
-	if len(segments) < 3 {
+	if len(segments) < 4 {
 		http.Error(w, "invalid path", http.StatusNotFound)
 		return
 	}
@@ -44,7 +45,57 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	provider := segments[3]
 	switch action {
 	case "login":
-		log.Println("TODO handle login for", provider)
+		provider, err := gomniauth.Provider(provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error when trying to get provider %s: %s", provider, err), http.StatusBadRequest)
+			return
+		}
+		loginUrl, err := provider.GetBeginAuthURL(nil, nil)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error when trying to GetBeginAuthURL for %s:%s", provider, err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Location", loginUrl)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	case "callback":
+		provider, err := gomniauth.Provider(provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error when trying to get provider %s: %s",
+				provider, err), http.StatusBadRequest)
+			return
+		}
+		creds, err :=
+			provider.CompleteAuth(objx.MustFromURLQuery(r.URL.RawQuery))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error when trying to complete auth for %s: %s", provider, err), http.StatusInternalServerError)
+			return
+		}
+		user, err := provider.GetUser(creds)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error when trying to get user from %s: %s",
+				provider, err), http.StatusInternalServerError)
+			return
+		}
+		fmt.Printf("received name: %s \n", user.Nickname())
+		var userName string
+		switch provider.Name() {
+		case "google":
+			userName = user.Name()
+		case "github":
+			userName = user.Nickname()
+		default:
+			fmt.Printf("Error, provider was: %s", provider.Name())
+			return
+		}
+		authCookieValue := objx.New(map[string]interface{}{
+			"name": userName,
+		}).MustBase64()
+		http.SetCookie(w, &http.Cookie{
+			Name:  "auth",
+			Value: authCookieValue,
+			Path:  "/"})
+		w.Header().Set("Location", "/chat")
+		w.WriteHeader(http.StatusTemporaryRedirect)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintf(w, "Auth action %s not supported", action)
